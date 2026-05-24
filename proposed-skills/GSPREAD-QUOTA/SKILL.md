@@ -53,8 +53,37 @@ except WorksheetNotFound:
 
 Ambos errores se produjeron en producción en tab-agente la semana del 5-6 mayo 2026 (commits 0b3803c y 5b2447a), con impacto real en journeys CLM de Falabella. Son silenciosos: el workflow queda rojo pero no hay alerta al usuario final.
 
+### 3. Race condition: get_all_values() + update(next_row) no es atómico
+
+Cuando dos instancias del mismo workflow corren al mismo tiempo (p.ej. un cron cada 30 min que puede solaparse), el patrón "leer filas → calcular next_row → escribir en next_row" falla:
+
+- Instancia A lee la hoja: next_row = 101
+- Instancia B lee la hoja (antes de que A escriba): next_row = 101
+- Ambas escriben en la fila 101 → una sobreescribe a la otra
+
+**Síntoma:** filas duplicadas o datos perdidos en el log; difícil de reproducir en desarrollo.
+
+**Fix:** usar `append_rows()`, que es atómico en la API de Google Sheets.
+
+```python
+# MAL — race condition si hay dos instancias corriendo
+all_values = ws.get_all_values()
+next_row = len(all_values) + 1
+ws.update(values=[nueva_fila], range_name=f'A{next_row}')
+
+# BIEN — append_rows es atómico
+ws.append_rows(
+    values=[nueva_fila],
+    value_input_option='USER_ENTERED',
+    insert_data_option='INSERT_ROWS'
+)
+```
+
+**Cuándo aplica:** scripts invocados por cron con frecuencia menor al tiempo de ejecución del script, o cualquier sistema donde dos instancias puedan correr simultáneamente (retry automático, GitHub Actions con concurrency no configurado).
+
 ## Checklist al revisar código con gspread
 
 - [ ] `gc.open_by_key()` está fuera de loops (o usa `get_sheet_cached`)
 - [ ] Bloques `except Exception` alrededor de `sh.worksheet()` cambiados a `except WorksheetNotFound`
 - [ ] Hojas nuevas creadas con `rows=100000` (no 10000 — se llena en semanas con logs activos)
+- [ ] Escrituras en filas nuevas usan `append_rows()` en vez de `get_all_values()` + `update(next_row)`
