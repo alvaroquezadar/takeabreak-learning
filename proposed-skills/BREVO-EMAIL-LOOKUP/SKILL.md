@@ -41,10 +41,9 @@ message_id = response.message_id  # formato: <uuid@smtp-relay.sendinblue.com>
 def verificar_evento_brevo(message_id: str | None, email: str, days: int, event: str) -> bool:
     """Lookup exacto por message_id; fallback a email para filas históricas."""
     if message_id:
-        # Brevo espera el ID sin los <> del header SMTP
-        mid_clean = message_id.strip('<>')
-        # Usar endpoint de estadísticas con messageId filter
-        params = {"messageId": mid_clean, "event": event, "days": days}
+        # Brevo requiere el messageId CON los brackets <> tal como viene del header SMTP
+        # strip('<>') antes del lookup retorna 0 resultados — validado mayo 2026
+        params = {"messageId": message_id, "event": event, "days": days}
     else:
         params = {"email": email, "event": event, "days": days}
     
@@ -63,7 +62,7 @@ HEADERS = ["fecha", "email", "tipo", "abierto", "clickeo", "message_id", ...]
 # Al leer para actualizar:
 idx_message_id = headers.index('message_id') if 'message_id' in headers else -1
 raw_mid = row[idx_message_id].strip() if idx_message_id >= 0 and idx_message_id < len(row) else ''
-message_id = raw_mid.strip('<>') if raw_mid else None
+message_id = raw_mid if raw_mid else None  # conservar <> — la API de Brevo los requiere
 ```
 
 ## Ventana de lookback
